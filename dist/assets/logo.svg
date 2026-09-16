@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" role="img" aria-label="Economeo">
+  <defs>
+    <linearGradient id="mint" x1="30" y1="22" x2="260" y2="290" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C8F44C"/>
+      <stop offset="1" stop-color="#5EE9B5"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="272" height="272" rx="86" fill="#071512"/>
+  <path d="M218 115c-23-31-60-48-99-40-52 10-87 61-78 114 9 53 58 90 112 83 38-5 69-32 81-67H113c7 16 23 27 41 27 25 0 46-20 46-45 0-24-19-44-44-45-16-1-30 7-38 20" fill="none" stroke="url(#mint)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="345" y="213" fill="#071512" font-family="Segoe UI, Arial, sans-serif" font-size="150" font-weight="700" letter-spacing="-8">Economeo</text>
+</svg>
+
