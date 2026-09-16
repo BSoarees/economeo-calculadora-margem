@@ -1,233 +1,228 @@
-const STORAGE_KEY = "economeo-margin-scenario-v1";
+const STORAGE_KEY = "economeo-plan-simulator-v2";
 
 const defaults = {
-  scenarioName: "Cenário base · 2026",
-  monthlyCustomers: 120,
+  scenarioName: "Cenário base · preços atuais",
   monthlyPrice: 29.9,
-  annualPixCustomers: 100,
+  monthlyActive: 120,
   annualPixPrice: 290,
-  newAnnualPixSales: 12,
-  annualCardCustomers: 80,
+  annualPixActive: 100,
+  annualPixSales: 12,
   annualCardPrice: 315,
-  newAnnualCardSales: 10,
-  whatsappMessages: 45,
-  whatsappUnitCost: 0.035,
-  whatsappProviderCost: 0.5,
-  aiActions: 20,
-  aiUnitCost: 0.025,
-  storagePerCustomer: 0.35,
-  supportPerCustomer: 0.75,
-  paymentFeePercent: 4.99,
-  paymentFeeFixed: 0.5,
+  annualCardActive: 80,
+  annualCardSales: 10,
   taxPercent: 6,
-  fixedInfra: 800,
-  teamCost: 4500,
-  marketingCost: 1500,
-  adminCost: 600,
-  otherFixedCost: 300,
-  allocations: [
-    { label: "Impostos", percent: 6, color: "#be6a52" },
-    { label: "Operação", percent: 34, color: "#0d4f3c" },
-    { label: "Produto e tecnologia", percent: 24, color: "#0d9f6e" },
-    { label: "Crescimento", percent: 16, color: "#4c82a8" },
-    { label: "Reserva", percent: 10, color: "#d6a13a" },
-    { label: "Distribuição", percent: 10, color: "#8464a8" }
-  ]
+  variableCostPerUser: 3.1,
+  fixedMonthlyCost: 7700,
+  monthlyCardRate: 4.99,
+  monthlyCardFixed: 0.49,
+  pixRate: 0.99,
+  pixFixed: 0,
+  annualCardRate: 4.99,
+  annualCardFixed: 0.49,
+  installments: 12,
+  anticipationRate: 1.49,
+  anticipate: true
 };
 
 let state = loadState();
 let toastTimer;
-
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const integer = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
+const number = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const percent = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+function cloneDefaults() { return JSON.parse(JSON.stringify(defaults)); }
 
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return saved ? { ...defaults, ...saved, allocations: saved.allocations || defaults.allocations } : structuredClone(defaults);
-  } catch { return structuredClone(defaults); }
+    return saved ? { ...cloneDefaults(), ...saved } : cloneDefaults();
+  } catch { return cloneDefaults(); }
 }
 
-function safeNumber(value) {
+function n(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-function calculate(s = state) {
-  const activeCustomers = s.monthlyCustomers + s.annualPixCustomers + s.annualCardCustomers;
-  const recognizedRevenue = s.monthlyCustomers * s.monthlyPrice + s.annualPixCustomers * (s.annualPixPrice / 12) + s.annualCardCustomers * (s.annualCardPrice / 12);
-  const cashIn = s.monthlyCustomers * s.monthlyPrice + s.newAnnualPixSales * s.annualPixPrice + s.newAnnualCardSales * s.annualCardPrice;
-  const equivalentMonthlyCharges = s.monthlyCustomers + (s.annualPixCustomers + s.annualCardCustomers) / 12;
-  const taxes = recognizedRevenue * (s.taxPercent / 100);
-  const paymentFees = recognizedRevenue * (s.paymentFeePercent / 100) + equivalentMonthlyCharges * s.paymentFeeFixed;
-  const whatsappCost = activeCustomers * (s.whatsappMessages * s.whatsappUnitCost + s.whatsappProviderCost);
-  const aiCost = activeCustomers * s.aiActions * s.aiUnitCost;
-  const dataSupportCost = activeCustomers * (s.storagePerCustomer + s.supportPerCustomer);
-  const otherVariable = aiCost + dataSupportCost;
-  const variableCosts = taxes + paymentFees + whatsappCost + otherVariable;
-  const contribution = recognizedRevenue - variableCosts;
-  const fixedCosts = s.fixedInfra + s.teamCost + s.marketingCost + s.adminCost + s.otherFixedCost;
-  const profit = contribution - fixedCosts;
-  const margin = recognizedRevenue ? profit / recognizedRevenue * 100 : 0;
-  const contributionPerCustomer = activeCustomers ? contribution / activeCustomers : 0;
-  const breakeven = contributionPerCustomer > 0 ? Math.ceil(fixedCosts / contributionPerCustomer) : 0;
-  const arpu = activeCustomers ? recognizedRevenue / activeCustomers : 0;
-  return { activeCustomers, recognizedRevenue, cashIn, taxes, paymentFees, whatsappCost, otherVariable, variableCosts, contribution, fixedCosts, profit, margin, breakeven, arpu, contributionPerCustomer };
+function cardSettlement(gross, ratePercent, fixedFee, installments, anticipationPercent, anticipate) {
+  const count = Math.max(1, Math.round(n(installments)));
+  const afterAcquirer = Math.max(0, gross * (1 - n(ratePercent) / 100) - n(fixedFee));
+  if (!anticipate || n(anticipationPercent) === 0 || count === 1) {
+    return { net: afterAcquirer, acquirerCost: gross - afterAcquirer, anticipationCost: 0, installments: count };
+  }
+  const monthlyRate = n(anticipationPercent) / 100;
+  const installmentValue = afterAcquirer / count;
+  let anticipatedNet = 0;
+  for (let month = 1; month <= count; month += 1) anticipatedNet += installmentValue / Math.pow(1 + monthlyRate, month);
+  return { net: anticipatedNet, acquirerCost: gross - afterAcquirer, anticipationCost: afterAcquirer - anticipatedNet, installments: count };
 }
 
-function bindFields() {
+function calculate(s = state) {
+  const monthlyFeePerSale = s.monthlyPrice * (s.monthlyCardRate / 100) + s.monthlyCardFixed;
+  const monthlyNet = Math.max(0, s.monthlyPrice - monthlyFeePerSale);
+  const pixFeePerSale = s.annualPixPrice * (s.pixRate / 100) + s.pixFixed;
+  const pixNet = Math.max(0, s.annualPixPrice - pixFeePerSale);
+  const annualCard = cardSettlement(s.annualCardPrice, s.annualCardRate, s.annualCardFixed, s.installments, s.anticipationRate, s.anticipate);
+  const annualCardTotalFees = s.annualCardPrice - annualCard.net;
+
+  const monthlyContribution = monthlyNet - s.monthlyPrice * (s.taxPercent / 100) - s.variableCostPerUser;
+  const pixContribution = pixNet - s.annualPixPrice * (s.taxPercent / 100) - s.variableCostPerUser * 12;
+  const cardContribution = annualCard.net - s.annualCardPrice * (s.taxPercent / 100) - s.variableCostPerUser * 12;
+
+  const active = s.monthlyActive + s.annualPixActive + s.annualCardActive;
+  const mrr = s.monthlyActive * s.monthlyPrice + s.annualPixActive * s.annualPixPrice / 12 + s.annualCardActive * s.annualCardPrice / 12;
+  const monthlyPaymentCosts = s.monthlyActive * monthlyFeePerSale + (s.annualPixActive / 12) * pixFeePerSale + (s.annualCardActive / 12) * annualCardTotalFees;
+  const taxes = mrr * (s.taxPercent / 100);
+  const variableCosts = active * s.variableCostPerUser;
+  const netRevenue = mrr - monthlyPaymentCosts - taxes;
+  const preFixedContribution = netRevenue - variableCosts;
+  const profit = preFixedContribution - s.fixedMonthlyCost;
+  const margin = mrr ? profit / mrr * 100 : 0;
+  const contributionPerActive = active ? preFixedContribution / active : 0;
+  const breakeven = contributionPerActive > 0 ? Math.ceil(s.fixedMonthlyCost / contributionPerActive) : 0;
+
+  const monthlyCash = s.monthlyActive * monthlyNet;
+  const pixCash = s.annualPixSales * pixNet;
+  const cardCashPerSale = s.anticipate ? annualCard.net : annualCard.net / annualCard.installments;
+  const cardCash = s.annualCardSales * cardCashPerSale;
+  const cashNow = monthlyCash + pixCash + cardCash;
+  const receivables = s.anticipate ? 0 : s.annualCardSales * annualCard.net * (annualCard.installments - 1) / annualCard.installments;
+
+  const comparison = [
+    { key: "monthly", label: "mensal no cartão", annualContribution: monthlyContribution * 12 },
+    { key: "pix", label: "anual no Pix", annualContribution: pixContribution },
+    { key: "card", label: "anual no cartão", annualContribution: cardContribution }
+  ].sort((a, b) => b.annualContribution - a.annualContribution);
+
+  return {
+    monthlyFeePerSale, monthlyNet, pixFeePerSale, pixNet, annualCard, annualCardTotalFees,
+    monthlyContribution, pixContribution, cardContribution, active, mrr, monthlyPaymentCosts,
+    taxes, variableCosts, netRevenue, preFixedContribution, profit, margin, contributionPerActive,
+    breakeven, cashNow, receivables, comparison
+  };
+}
+
+function bindInputs() {
   document.querySelectorAll("[data-key]").forEach((input) => {
-    input.value = state[input.dataset.key];
+    const key = input.dataset.key;
+    if (input.type === "checkbox") input.checked = Boolean(state[key]);
+    else input.value = state[key];
     input.addEventListener("input", () => {
-      state[input.dataset.key] = safeNumber(input.value);
+      state[key] = input.type === "checkbox" ? input.checked : n(input.value);
       persistAndRender();
     });
-    input.addEventListener("focus", () => input.select());
+    if (input.type === "number") input.addEventListener("focus", () => input.select());
   });
-  const name = document.getElementById("scenarioName");
-  name.value = state.scenarioName;
-  name.addEventListener("input", () => { state.scenarioName = name.value; persistAndRender(); });
-}
-
-function renderAllocations() {
-  const fields = document.getElementById("allocationFields");
-  fields.innerHTML = "";
-  state.allocations.forEach((item, index) => {
-    const row = document.createElement("div");
-    row.className = "allocation-row";
-    row.innerHTML = `<input type="text" aria-label="Nome da divisão ${index + 1}" value="${escapeHtml(item.label)}"><input type="number" min="0" max="100" step="0.1" aria-label="Percentual de ${escapeHtml(item.label)}" value="${item.percent}"><output>${money.format(calculate().cashIn * item.percent / 100)}</output>`;
-    const [labelInput, percentInput] = row.querySelectorAll("input");
-    labelInput.addEventListener("input", () => { state.allocations[index].label = labelInput.value; persistAndRender(false); });
-    percentInput.addEventListener("input", () => { state.allocations[index].percent = safeNumber(percentInput.value); persistAndRender(false); });
-    fields.appendChild(row);
-  });
-}
-
-function updateAllocationOutputs() {
-  const result = calculate();
-  const outputs = document.querySelectorAll("#allocationFields output");
-  const list = document.getElementById("allocationResults");
-  list.innerHTML = "";
-  state.allocations.forEach((item, index) => {
-    if (outputs[index]) outputs[index].textContent = money.format(result.cashIn * item.percent / 100);
-    const row = document.createElement("div");
-    row.className = "allocation-result";
-    row.innerHTML = `<span><i style="background:${item.color}"></i>${escapeHtml(item.label || `Destino ${index + 1}`)} · ${percent.format(item.percent)}%</span><strong>${money.format(result.cashIn * item.percent / 100)}</strong>`;
-    list.appendChild(row);
-  });
-  const total = state.allocations.reduce((sum, item) => sum + safeNumber(item.percent), 0);
-  const totalEl = document.getElementById("allocationTotal");
-  totalEl.textContent = `${percent.format(total)}%`;
-  totalEl.classList.toggle("invalid", Math.abs(total - 100) > .01);
+  const scenario = document.getElementById("scenarioName");
+  scenario.value = state.scenarioName;
+  scenario.addEventListener("input", () => { state.scenarioName = scenario.value; persistAndRender(); });
 }
 
 function render() {
   const r = calculate();
+  const installments = Math.max(1, Math.round(state.installments));
+  setText("installmentLabel", `${installments}× no cartão`);
+  setText("cardNetLabel", state.anticipate ? "líquido antecipado" : `total em ${installments} parcelas`);
+
+  setText("monthlyNet", money.format(r.monthlyNet));
+  setText("monthlyFees", money.format(r.monthlyFeePerSale));
+  setText("monthlyContribution", money.format(r.monthlyContribution));
+  setText("pixNet", money.format(r.pixNet));
+  setText("pixFees", money.format(r.pixFeePerSale));
+  setText("pixContribution", money.format(r.pixContribution));
+  setText("cardNet", money.format(r.annualCard.net));
+  setText("cardFees", money.format(r.annualCardTotalFees));
+  setText("cardContribution", money.format(r.cardContribution));
+
+  const retained = [
+    state.monthlyPrice ? r.monthlyNet / state.monthlyPrice * 100 : 0,
+    state.annualPixPrice ? r.pixNet / state.annualPixPrice * 100 : 0,
+    state.annualCardPrice ? r.annualCard.net / state.annualCardPrice * 100 : 0
+  ];
+  document.getElementById("monthlyBar").style.width = `${Math.max(0, Math.min(100, retained[0]))}%`;
+  document.getElementById("pixBar").style.width = `${Math.max(0, Math.min(100, retained[1]))}%`;
+  document.getElementById("cardBar").style.width = `${Math.max(0, Math.min(100, retained[2]))}%`;
+
+  setText("winnerText", `${capitalize(r.comparison[0].label)} deixa mais dinheiro por ano`);
+  setText("mrrValue", money.format(r.mrr));
+  setText("cashNowValue", money.format(r.cashNow));
+  setText("cashNowNote", state.anticipate ? "líquido de taxas e antecipação" : "inclui só a 1ª parcela das vendas anuais");
+  setText("netRevenueValue", money.format(r.netRevenue));
+  setText("variableCostsValue", `− ${money.format(r.variableCosts)}`);
+  setText("fixedCostValue", `− ${money.format(state.fixedMonthlyCost)}`);
   setText("profitValue", money.format(r.profit));
   document.getElementById("profitValue").classList.toggle("negative", r.profit < 0);
   setText("marginValue", `${percent.format(r.margin)}%`);
-  setText("activeCustomersValue", integer.format(r.activeCustomers));
-  setText("arpuValue", money.format(r.arpu));
-  setText("breakevenValue", r.breakeven ? `${integer.format(r.breakeven)} clientes` : "—");
-  setText("recognizedRevenueValue", money.format(r.recognizedRevenue));
-  setText("taxValue", money.format(r.taxes));
-  setText("paymentFeesValue", money.format(r.paymentFees));
-  setText("whatsappCostValue", money.format(r.whatsappCost));
-  setText("otherVariableValue", money.format(r.otherVariable));
-  setText("contributionValue", money.format(r.contribution));
-  setText("fixedCostsValue", money.format(r.fixedCosts));
-  setText("resultValue", money.format(r.profit));
-  setText("cashInValue", money.format(r.cashIn));
+  setText("breakevenValue", r.breakeven ? `${number.format(r.breakeven)} clientes` : "—");
+  setText("receivablesValue", money.format(r.receivables));
 
   const badge = document.getElementById("healthBadge");
   badge.className = "health";
-  if (r.margin >= 25) badge.textContent = "Margem saudável";
+  if (r.margin >= 20) badge.textContent = "Margem saudável";
   else if (r.margin >= 0) { badge.textContent = "Margem apertada"; badge.classList.add("warning"); }
   else { badge.textContent = "Operação no vermelho"; badge.classList.add("danger"); }
 
-  const gap = r.breakeven - r.activeCustomers;
+  const pixAdvantage = r.pixContribution - r.cardContribution;
   let insight;
-  if (!r.activeCustomers) insight = "Adicione clientes ativos para calcular a economia por assinatura.";
-  else if (r.profit >= 0) insight = `Cada cliente contribui com ${money.format(r.contributionPerCustomer)} antes dos custos fixos. A operação está ${integer.format(Math.max(0, r.activeCustomers - r.breakeven))} clientes acima do ponto de equilíbrio.`;
-  else insight = `Cada cliente contribui com ${money.format(r.contributionPerCustomer)} antes dos custos fixos. Faltam aproximadamente ${integer.format(Math.max(0, gap))} clientes para cobrir a estrutura atual.`;
-  setText("insightText", insight);
-  updateAllocationOutputs();
+  if (!r.active) insight = "Adicione a base ativa para calcular a margem total e o ponto de equilíbrio.";
+  else if (pixAdvantage > 0) insight = `No cenário atual, o Pix preserva ${money.format(pixAdvantage)} a mais que o cartão anual por venda. O efeito vem das taxas e da antecipação.`;
+  else if (pixAdvantage < 0) insight = `O cartão anual preserva ${money.format(Math.abs(pixAdvantage))} a mais que o Pix por venda neste cenário.`;
+  else insight = "Pix e cartão anual deixam a mesma contribuição por venda neste cenário.";
+  setText("decisionText", insight);
 }
 
-function persistAndRender(rebuildAllocations = false) {
+function persistAndRender() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   const status = document.getElementById("saveStatus");
   status.textContent = "Salvando…";
-  requestAnimationFrame(() => { render(); if (rebuildAllocations) renderAllocations(); status.textContent = "Salvo neste navegador"; });
-}
-
-function scenarioSummary() {
-  const r = calculate();
-  const allocation = state.allocations.map(i => `• ${i.label}: ${percent.format(i.percent)}% (${money.format(r.cashIn * i.percent / 100)})`).join("\n");
-  return `${state.scenarioName}\n\nClientes ativos: ${integer.format(r.activeCustomers)}\nReceita mensal reconhecida: ${money.format(r.recognizedRevenue)}\nCaixa recebido: ${money.format(r.cashIn)}\nMargem de contribuição: ${money.format(r.contribution)}\nCustos fixos: ${money.format(r.fixedCosts)}\nResultado operacional: ${money.format(r.profit)} (${percent.format(r.margin)}%)\nPonto de equilíbrio: ${integer.format(r.breakeven)} clientes\n\nDivisão do caixa\n${allocation}`;
-}
-
-function exportScenario() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${slugify(state.scenarioName || "cenario-economeo")}.json`;
-  link.click();
-  URL.revokeObjectURL(url);
-  showToast("Cenário exportado");
-}
-
-async function importScenario(file) {
-  try {
-    const imported = JSON.parse(await file.text());
-    if (!imported || typeof imported !== "object") throw new Error("invalid");
-    state = { ...structuredClone(defaults), ...imported, allocations: Array.isArray(imported.allocations) ? imported.allocations : structuredClone(defaults.allocations) };
-    document.getElementById("scenarioName").value = state.scenarioName;
-    document.querySelectorAll("[data-key]").forEach(input => input.value = state[input.dataset.key]);
-    renderAllocations();
-    persistAndRender();
-    showToast("Cenário importado");
-  } catch { showToast("Arquivo inválido"); }
-}
-
-async function copySummary() {
-  try { await navigator.clipboard.writeText(scenarioSummary()); showToast("Resumo copiado"); }
-  catch { showToast("Não foi possível copiar"); }
+  requestAnimationFrame(() => { render(); status.textContent = "Salvo neste navegador"; });
 }
 
 function resetScenario() {
-  state = structuredClone(defaults);
+  state = cloneDefaults();
   localStorage.removeItem(STORAGE_KEY);
   document.getElementById("scenarioName").value = state.scenarioName;
-  document.querySelectorAll("[data-key]").forEach(input => input.value = state[input.dataset.key]);
-  renderAllocations(); render(); showToast("Exemplo restaurado");
+  document.querySelectorAll("[data-key]").forEach(input => {
+    const value = state[input.dataset.key];
+    if (input.type === "checkbox") input.checked = Boolean(value); else input.value = value;
+  });
+  render();
+  showToast("Exemplo restaurado");
+}
+
+function summaryText() {
+  const r = calculate();
+  return `${state.scenarioName}\n\nCOMPARAÇÃO POR VENDA\nMensal cartão: líquido ${money.format(r.monthlyNet)} · contribuição mensal ${money.format(r.monthlyContribution)}\nAnual Pix: líquido ${money.format(r.pixNet)} · contribuição anual ${money.format(r.pixContribution)}\nAnual cartão: líquido ${money.format(r.annualCard.net)} · contribuição anual ${money.format(r.cardContribution)}\n\nVISÃO DO MÊS\nClientes ativos: ${number.format(r.active)}\nReceita mensal equivalente: ${money.format(r.mrr)}\nCaixa líquido agora: ${money.format(r.cashNow)}\nRecebíveis futuros: ${money.format(r.receivables)}\nResultado operacional: ${money.format(r.profit)} (${percent.format(r.margin)}%)\nPonto de equilíbrio: ${r.breakeven ? number.format(r.breakeven) + " clientes" : "—"}`;
+}
+
+async function copySummary() {
+  try { await navigator.clipboard.writeText(summaryText()); showToast("Resumo copiado"); }
+  catch { showToast("Não foi possível copiar"); }
 }
 
 function registerWebMcp() {
   const context = document.modelContext;
   if (!context?.registerTool) return;
   const lifecycle = new AbortController();
-  const register = (tool) => Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => {});
+  const register = tool => Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => {});
   register({
-    name: "read_economeo_margin_scenario",
-    title: "Ler cenário de margem",
-    description: "Retorna as premissas e os principais resultados do cenário atualmente visível.",
+    name: "read_economeo_plan_scenario",
+    title: "Ler cenário dos planos",
+    description: "Retorna preços, taxas e os resultados atualmente visíveis no simulador.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, untrustedContentHint: false },
-    execute: () => ({ scenario: state, results: calculate() })
+    execute: () => ({ assumptions: state, results: calculate() })
   });
   register({
-    name: "update_economeo_margin_assumptions",
-    title: "Atualizar premissas de margem",
-    description: "Atualiza em lote campos numéricos existentes do cenário e recalcula a tela.",
+    name: "update_economeo_plan_scenario",
+    title: "Atualizar cenário dos planos",
+    description: "Atualiza em lote premissas numéricas do simulador e recalcula a tela.",
     inputSchema: { type: "object", properties: { assumptions: { type: "object", additionalProperties: { type: "number", minimum: 0 } } }, required: ["assumptions"], additionalProperties: false },
     annotations: { readOnlyHint: false, untrustedContentHint: false },
     execute: ({ assumptions }) => {
       const allowed = Object.keys(defaults).filter(key => typeof defaults[key] === "number");
       Object.entries(assumptions || {}).forEach(([key, value]) => { if (allowed.includes(key) && Number.isFinite(value) && value >= 0) state[key] = value; });
-      document.querySelectorAll("[data-key]").forEach(input => input.value = state[input.dataset.key]);
+      document.querySelectorAll("[data-key]").forEach(input => { if (input.type !== "checkbox") input.value = state[input.dataset.key]; });
       persistAndRender();
       return { updated: true, results: calculate() };
     }
@@ -235,16 +230,11 @@ function registerWebMcp() {
 }
 
 function setText(id, value) { document.getElementById(id).textContent = value; }
-function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]); }
-function slugify(value) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
-function showToast(message) { const el = document.getElementById("toast"); el.textContent = message; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 1800); }
+function capitalize(value) { return value.charAt(0).toUpperCase() + value.slice(1); }
+function showToast(message) { const toast = document.getElementById("toast"); toast.textContent = message; toast.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("show"), 1800); }
 
 document.getElementById("resetButton").addEventListener("click", resetScenario);
-document.getElementById("exportButton").addEventListener("click", exportScenario);
 document.getElementById("copyButton").addEventListener("click", copySummary);
-document.getElementById("importInput").addEventListener("change", event => { const file = event.target.files?.[0]; if (file) importScenario(file); event.target.value = ""; });
-
-bindFields();
-renderAllocations();
+bindInputs();
 render();
 registerWebMcp();

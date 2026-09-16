@@ -3,147 +3,164 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Calculadora interna de margem e caixa do Economeo." />
-    <meta name="theme-color" content="#0d4f3c" />
+    <meta name="description" content="Simulador local de preços, taxas de pagamento e margem do Economeo." />
+    <meta name="theme-color" content="#103f32" />
     <link rel="icon" href="assets/favicon.svg" />
     <link rel="stylesheet" href="styles.css" />
-    <title>Economeo — Margem & caixa</title>
+    <title>Economeo — Simulador de planos</title>
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="#" aria-label="Economeo">
+      <div class="brand">
         <img src="assets/logo.svg" alt="Economeo" />
-        <span>Margem & caixa</span>
-      </a>
-      <div class="actions">
-        <button class="button ghost" id="resetButton" type="button">Restaurar exemplo</button>
-        <button class="button ghost" id="exportButton" type="button">Exportar cenário</button>
-        <label class="button ghost file-button">
-          Importar cenário
-          <input id="importInput" type="file" accept="application/json" />
-        </label>
-        <button class="button primary" id="copyButton" type="button">Copiar resumo</button>
+        <span>Simulador de planos</span>
+      </div>
+      <div class="top-actions">
+        <span id="saveStatus">Salvo neste navegador</span>
+        <button class="text-button" id="resetButton" type="button">Restaurar exemplo</button>
+        <button class="primary-button" id="copyButton" type="button">Copiar resumo</button>
       </div>
     </header>
 
-    <main class="workspace">
-      <section class="editor" aria-labelledby="page-title">
+    <main class="page-shell">
+      <section class="controls" aria-labelledby="pageTitle">
         <div class="intro">
           <p class="eyebrow">Cenário editável</p>
-          <div class="title-line">
-            <input id="scenarioName" class="scenario-name" value="Cenário base · 2026" aria-label="Nome do cenário" />
-            <span class="save-status" id="saveStatus">Salvo neste navegador</span>
-          </div>
-          <h1 id="page-title">Quanto sobra em cada assinatura?</h1>
-          <p>Altere qualquer premissa. O resultado mensal e o caixa recebido são recalculados na hora.</p>
+          <input id="scenarioName" class="scenario-name" aria-label="Nome do cenário" />
+          <h1 id="pageTitle">Qual plano deixa mais dinheiro?</h1>
+          <p>Compare o mensal no cartão, o anual no Pix e o anual no cartão — incluindo parcelamento e antecipação.</p>
         </div>
 
         <form id="calculator" novalidate>
-          <section class="input-section">
-            <div class="section-heading">
-              <span>01</span>
-              <div><h2>Base e preços</h2><p>Clientes ativos por modalidade e novas vendas anuais no mês.</p></div>
+          <section class="section">
+            <div class="section-title">
+              <span>1</span>
+              <div><h2>Planos e volume</h2><p>O que está ativo hoje e o que vendeu neste mês.</p></div>
             </div>
-            <div class="field-grid three">
-              <label class="field"><span>Mensais ativos</span><input data-key="monthlyCustomers" type="number" min="0" step="1" /><small>clientes</small></label>
-              <label class="field"><span>Preço mensal</span><input data-key="monthlyPrice" type="number" min="0" step="0.01" /><small>R$ / mês</small></label>
-              <div class="field empty" aria-hidden="true"></div>
 
-              <label class="field"><span>Anuais no Pix ativos</span><input data-key="annualPixCustomers" type="number" min="0" step="1" /><small>clientes</small></label>
-              <label class="field"><span>Preço anual no Pix</span><input data-key="annualPixPrice" type="number" min="0" step="0.01" /><small>R$ / ano</small></label>
-              <label class="field"><span>Novas vendas Pix</span><input data-key="newAnnualPixSales" type="number" min="0" step="1" /><small>neste mês</small></label>
+            <div class="plan-table" role="group" aria-label="Planos do Economeo">
+              <div class="plan-table-head" aria-hidden="true">
+                <span>Plano</span><span>Preço</span><span>Ativos</span><span>Vendas no mês</span>
+              </div>
 
-              <label class="field"><span>Anuais no cartão ativos</span><input data-key="annualCardCustomers" type="number" min="0" step="1" /><small>clientes</small></label>
-              <label class="field"><span>Preço anual no cartão</span><input data-key="annualCardPrice" type="number" min="0" step="0.01" /><small>R$ / ano</small></label>
-              <label class="field"><span>Novas vendas cartão</span><input data-key="newAnnualCardSales" type="number" min="0" step="1" /><small>neste mês</small></label>
-            </div>
-          </section>
+              <div class="plan-row monthly">
+                <div class="plan-name"><i></i><strong>Mensal</strong><small>cartão recorrente</small></div>
+                <label><span>Preço</span><div class="input-prefix"><b>R$</b><input data-key="monthlyPrice" type="number" min="0" step="0.01" /></div></label>
+                <label><span>Ativos</span><input data-key="monthlyActive" type="number" min="0" step="1" /></label>
+                <div class="same-as-active">cobra todos os ativos</div>
+              </div>
 
-          <section class="input-section">
-            <div class="section-heading">
-              <span>02</span>
-              <div><h2>Custos por uso</h2><p>Custos que crescem conforme clientes usam o Méo.</p></div>
-            </div>
-            <div class="field-grid three">
-              <label class="field"><span>Mensagens WhatsApp</span><input data-key="whatsappMessages" type="number" min="0" step="1" /><small>por cliente / mês</small></label>
-              <label class="field"><span>Custo por mensagem</span><input data-key="whatsappUnitCost" type="number" min="0" step="0.0001" /><small>R$</small></label>
-              <label class="field"><span>Taxa do provedor</span><input data-key="whatsappProviderCost" type="number" min="0" step="0.01" /><small>R$ / cliente</small></label>
+              <div class="plan-row pix">
+                <div class="plan-name"><i></i><strong>Anual Pix</strong><small>pagamento à vista</small></div>
+                <label><span>Preço</span><div class="input-prefix"><b>R$</b><input data-key="annualPixPrice" type="number" min="0" step="0.01" /></div></label>
+                <label><span>Ativos</span><input data-key="annualPixActive" type="number" min="0" step="1" /></label>
+                <label><span>Vendas no mês</span><input data-key="annualPixSales" type="number" min="0" step="1" /></label>
+              </div>
 
-              <label class="field"><span>Leituras com IA</span><input data-key="aiActions" type="number" min="0" step="1" /><small>por cliente / mês</small></label>
-              <label class="field"><span>Custo por leitura</span><input data-key="aiUnitCost" type="number" min="0" step="0.0001" /><small>R$</small></label>
-              <label class="field"><span>Banco e armazenamento</span><input data-key="storagePerCustomer" type="number" min="0" step="0.01" /><small>R$ / cliente</small></label>
-
-              <label class="field"><span>Suporte variável</span><input data-key="supportPerCustomer" type="number" min="0" step="0.01" /><small>R$ / cliente</small></label>
-              <label class="field"><span>Taxa de pagamento</span><input data-key="paymentFeePercent" type="number" min="0" max="100" step="0.01" /><small>% do caixa</small></label>
-              <label class="field"><span>Taxa fixa por cobrança</span><input data-key="paymentFeeFixed" type="number" min="0" step="0.01" /><small>R$</small></label>
-            </div>
-            <p class="source-note">As tarifas do WhatsApp variam por categoria, país e provedor. Mantenha os valores editáveis e valide na <a href="https://business.whatsapp.com/products/platform-pricing" target="_blank" rel="noreferrer">tabela oficial da Meta</a>.</p>
-          </section>
-
-          <section class="input-section">
-            <div class="section-heading">
-              <span>03</span>
-              <div><h2>Estrutura mensal</h2><p>Despesas que existem mesmo sem uma nova assinatura.</p></div>
-            </div>
-            <div class="field-grid three">
-              <label class="field"><span>Impostos</span><input data-key="taxPercent" type="number" min="0" max="100" step="0.01" /><small>% da receita</small></label>
-              <label class="field"><span>Infraestrutura fixa</span><input data-key="fixedInfra" type="number" min="0" step="0.01" /><small>R$ / mês</small></label>
-              <label class="field"><span>Produto e equipe</span><input data-key="teamCost" type="number" min="0" step="0.01" /><small>R$ / mês</small></label>
-              <label class="field"><span>Marketing</span><input data-key="marketingCost" type="number" min="0" step="0.01" /><small>R$ / mês</small></label>
-              <label class="field"><span>Administrativo</span><input data-key="adminCost" type="number" min="0" step="0.01" /><small>R$ / mês</small></label>
-              <label class="field"><span>Outros custos fixos</span><input data-key="otherFixedCost" type="number" min="0" step="0.01" /><small>R$ / mês</small></label>
+              <div class="plan-row annual-card">
+                <div class="plan-name"><i></i><strong>Anual cartão</strong><small id="installmentLabel">12× no cartão</small></div>
+                <label><span>Preço</span><div class="input-prefix"><b>R$</b><input data-key="annualCardPrice" type="number" min="0" step="0.01" /></div></label>
+                <label><span>Ativos</span><input data-key="annualCardActive" type="number" min="0" step="1" /></label>
+                <label><span>Vendas no mês</span><input data-key="annualCardSales" type="number" min="0" step="1" /></label>
+              </div>
             </div>
           </section>
 
-          <section class="input-section allocation-section">
-            <div class="section-heading">
-              <span>04</span>
-              <div><h2>Divisão do dinheiro que entra</h2><p>Uma regra de caixa. A soma precisa fechar em 100%.</p></div>
+          <section class="section compact-section">
+            <div class="section-title">
+              <span>2</span>
+              <div><h2>Custos do negócio</h2><p>Três números para chegar à margem operacional.</p></div>
             </div>
-            <div id="allocationFields" class="allocation-list"></div>
-            <div class="allocation-total"><span>Total distribuído</span><strong id="allocationTotal">100%</strong></div>
+            <div class="simple-fields">
+              <label><span>Impostos sobre receita</span><div class="input-suffix"><input data-key="taxPercent" type="number" min="0" max="100" step="0.01" /><b>%</b></div></label>
+              <label><span>Custo por cliente</span><div class="input-prefix"><b>R$</b><input data-key="variableCostPerUser" type="number" min="0" step="0.01" /></div><small>WhatsApp, IA, banco e suporte / mês</small></label>
+              <label><span>Estrutura fixa mensal</span><div class="input-prefix"><b>R$</b><input data-key="fixedMonthlyCost" type="number" min="0" step="0.01" /></div><small>equipe, ferramentas, marketing e administrativo</small></label>
+            </div>
           </section>
+
+          <details class="advanced" id="advancedFees">
+            <summary>
+              <div><strong>Taxas dos meios de pagamento</strong><span>Abra para ajustar maquininha, Pix, parcelas e antecipação.</span></div>
+              <span class="chevron">⌄</span>
+            </summary>
+            <div class="advanced-body">
+              <div class="fee-group">
+                <h3>Mensal no cartão</h3>
+                <div class="fee-fields">
+                  <label><span>Taxa</span><div class="input-suffix"><input data-key="monthlyCardRate" type="number" min="0" max="100" step="0.01" /><b>%</b></div></label>
+                  <label><span>Fixa por cobrança</span><div class="input-prefix"><b>R$</b><input data-key="monthlyCardFixed" type="number" min="0" step="0.01" /></div></label>
+                </div>
+              </div>
+              <div class="fee-group">
+                <h3>Anual no Pix</h3>
+                <div class="fee-fields">
+                  <label><span>Taxa</span><div class="input-suffix"><input data-key="pixRate" type="number" min="0" max="100" step="0.01" /><b>%</b></div></label>
+                  <label><span>Fixa por Pix</span><div class="input-prefix"><b>R$</b><input data-key="pixFixed" type="number" min="0" step="0.01" /></div></label>
+                </div>
+              </div>
+              <div class="fee-group wide">
+                <h3>Anual no cartão</h3>
+                <div class="fee-fields four">
+                  <label><span>Taxa do cartão</span><div class="input-suffix"><input data-key="annualCardRate" type="number" min="0" max="100" step="0.01" /><b>%</b></div></label>
+                  <label><span>Fixa por venda</span><div class="input-prefix"><b>R$</b><input data-key="annualCardFixed" type="number" min="0" step="0.01" /></div></label>
+                  <label><span>Número de parcelas</span><input data-key="installments" type="number" min="1" max="24" step="1" /></label>
+                  <label><span>Antecipação ao mês</span><div class="input-suffix"><input data-key="anticipationRate" type="number" min="0" max="100" step="0.01" /><b>%</b></div></label>
+                </div>
+                <label class="switch-line"><input data-key="anticipate" type="checkbox" /><span class="switch"></span><span>Antecipar todas as parcelas</span></label>
+                <p>A antecipação é uma estimativa financeira. A cobrança exata depende do contrato com a adquirente.</p>
+              </div>
+            </div>
+          </details>
         </form>
       </section>
 
       <aside class="results" aria-live="polite">
-        <div class="results-head">
-          <p class="eyebrow">Leitura do mês</p>
-          <span class="health" id="healthBadge">Margem saudável</span>
+        <div class="result-header">
+          <div><p class="eyebrow">Comparação por venda</p><h2 id="winnerText">O anual no Pix deixa mais dinheiro</h2></div>
+          <span class="health" id="healthBadge">Margem positiva</span>
         </div>
 
-        <div class="hero-result">
-          <span>Lucro operacional estimado</span>
-          <strong id="profitValue">R$ 0,00</strong>
-          <div class="margin-line"><span id="marginValue">0%</span> de margem líquida</div>
+        <div class="plan-results">
+          <article class="plan-result" data-plan="monthly">
+            <div class="plan-result-title"><span>Mensal cartão</span><small>líquido por cobrança</small></div>
+            <strong id="monthlyNet">R$ 0,00</strong>
+            <div class="bar"><i id="monthlyBar"></i></div>
+            <dl><div><dt>Taxas</dt><dd id="monthlyFees">R$ 0,00</dd></div><div><dt>Sobra após custo mensal</dt><dd id="monthlyContribution">R$ 0,00</dd></div></dl>
+          </article>
+          <article class="plan-result" data-plan="pix">
+            <div class="plan-result-title"><span>Anual Pix</span><small>líquido à vista</small></div>
+            <strong id="pixNet">R$ 0,00</strong>
+            <div class="bar"><i id="pixBar"></i></div>
+            <dl><div><dt>Taxas</dt><dd id="pixFees">R$ 0,00</dd></div><div><dt>Sobra anual estimada</dt><dd id="pixContribution">R$ 0,00</dd></div></dl>
+          </article>
+          <article class="plan-result" data-plan="card">
+            <div class="plan-result-title"><span>Anual cartão</span><small id="cardNetLabel">líquido antecipado</small></div>
+            <strong id="cardNet">R$ 0,00</strong>
+            <div class="bar"><i id="cardBar"></i></div>
+            <dl><div><dt>Custo financeiro</dt><dd id="cardFees">R$ 0,00</dd></div><div><dt>Sobra anual estimada</dt><dd id="cardContribution">R$ 0,00</dd></div></dl>
+          </article>
         </div>
 
-        <div class="metric-strip">
-          <div><span>Clientes ativos</span><strong id="activeCustomersValue">0</strong></div>
-          <div><span>Ticket médio</span><strong id="arpuValue">R$ 0,00</strong></div>
+        <section class="month-summary">
+          <div class="summary-title"><h2>Visão do mês</h2><span>resultado + caixa</span></div>
+          <div class="main-metrics">
+            <div><span>Receita mensal equivalente</span><strong id="mrrValue">R$ 0,00</strong><small>anual dividido por 12</small></div>
+            <div><span>Caixa que entra agora</span><strong id="cashNowValue">R$ 0,00</strong><small id="cashNowNote">mensais + novas vendas</small></div>
+          </div>
+          <div class="summary-rows">
+            <div><span>Receita líquida de taxas e impostos</span><strong id="netRevenueValue">R$ 0,00</strong></div>
+            <div><span>Custos dos clientes</span><strong id="variableCostsValue">− R$ 0,00</strong></div>
+            <div><span>Estrutura fixa</span><strong id="fixedCostValue">− R$ 0,00</strong></div>
+            <div class="total"><span>Resultado operacional</span><strong id="profitValue">R$ 0,00</strong></div>
+          </div>
+          <div class="margin-row"><span>Margem operacional</span><strong id="marginValue">0%</strong></div>
+        </section>
+
+        <section class="decision-strip">
           <div><span>Ponto de equilíbrio</span><strong id="breakevenValue">0 clientes</strong></div>
-        </div>
-
-        <div class="statement">
-          <div class="statement-title"><h2>Resultado mensal</h2><span>competência</span></div>
-          <div class="statement-row"><span>Receita reconhecida</span><strong id="recognizedRevenueValue">R$ 0,00</strong></div>
-          <div class="statement-row negative"><span>Impostos</span><strong id="taxValue">R$ 0,00</strong></div>
-          <div class="statement-row negative"><span>Pagamentos</span><strong id="paymentFeesValue">R$ 0,00</strong></div>
-          <div class="statement-row negative"><span>WhatsApp</span><strong id="whatsappCostValue">R$ 0,00</strong></div>
-          <div class="statement-row negative"><span>IA, dados e suporte</span><strong id="otherVariableValue">R$ 0,00</strong></div>
-          <div class="statement-row subtotal"><span>Margem de contribuição</span><strong id="contributionValue">R$ 0,00</strong></div>
-          <div class="statement-row negative"><span>Estrutura fixa</span><strong id="fixedCostsValue">R$ 0,00</strong></div>
-          <div class="statement-row total"><span>Resultado operacional</span><strong id="resultValue">R$ 0,00</strong></div>
-        </div>
-
-        <div class="cash-block">
-          <div class="statement-title"><h2>Caixa recebido no mês</h2><span>movimento financeiro</span></div>
-          <strong class="cash-total" id="cashInValue">R$ 0,00</strong>
-          <p id="cashExplanation">Mensalidades e novas vendas anuais recebidas no período.</p>
-          <div id="allocationResults" class="allocation-results"></div>
-        </div>
-
-        <div class="insight" id="insightText">Preencha as premissas para começar.</div>
+          <div><span>Recebíveis futuros</span><strong id="receivablesValue">R$ 0,00</strong></div>
+          <p id="decisionText">Ajuste os valores para ver a leitura do cenário.</p>
+        </section>
       </aside>
     </main>
 
