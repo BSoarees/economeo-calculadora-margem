@@ -1,18 +1,18 @@
-const STORAGE_KEY = "economeo-plan-simulator-v2";
+const STORAGE_KEY = "economeo-unit-economics-v3";
 
 const defaults = {
-  scenarioName: "Cenário base · preços atuais",
+  scenarioName: "Cenário para reunião · valores ilustrativos",
+  messagesPerUser: 150,
+  aiActionsPerUser: 25,
+  messageUnitCost: 0.035,
+  aiUnitCost: 0.025,
+  otherVariableCost: 1.25,
   monthlyPrice: 29.9,
-  monthlyActive: 120,
   annualPixPrice: 290,
-  annualPixActive: 100,
-  annualPixSales: 12,
   annualCardPrice: 315,
-  annualCardActive: 80,
-  annualCardSales: 10,
-  taxPercent: 6,
-  variableCostPerUser: 3.1,
+  activeCustomers: 300,
   fixedMonthlyCost: 7700,
+  taxPercent: 6,
   monthlyCardRate: 4.99,
   monthlyCardFixed: 0.49,
   pixRate: 0.99,
@@ -24,13 +24,21 @@ const defaults = {
   anticipate: true
 };
 
+const presets = {
+  light: { messagesPerUser: 50, aiActionsPerUser: 8 },
+  base: { messagesPerUser: 150, aiActionsPerUser: 25 },
+  heavy: { messagesPerUser: 400, aiActionsPerUser: 60 }
+};
+
+const labels = { monthly: "Mensal no cartão", pix: "Anual no Pix", card: "Anual no cartão" };
+const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const integer = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
+const percent = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 let state = loadState();
 let toastTimer;
-const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const number = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
-const percent = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 function cloneDefaults() { return JSON.parse(JSON.stringify(defaults)); }
+function safeNumber(value) { const parsed = Number(value); return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0; }
 
 function loadState() {
   try {
@@ -39,76 +47,63 @@ function loadState() {
   } catch { return cloneDefaults(); }
 }
 
-function n(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-
 function cardSettlement(gross, ratePercent, fixedFee, installments, anticipationPercent, anticipate) {
-  const count = Math.max(1, Math.round(n(installments)));
-  const afterAcquirer = Math.max(0, gross * (1 - n(ratePercent) / 100) - n(fixedFee));
-  if (!anticipate || n(anticipationPercent) === 0 || count === 1) {
-    return { net: afterAcquirer, acquirerCost: gross - afterAcquirer, anticipationCost: 0, installments: count };
-  }
-  const monthlyRate = n(anticipationPercent) / 100;
-  const installmentValue = afterAcquirer / count;
-  let anticipatedNet = 0;
-  for (let month = 1; month <= count; month += 1) anticipatedNet += installmentValue / Math.pow(1 + monthlyRate, month);
-  return { net: anticipatedNet, acquirerCost: gross - afterAcquirer, anticipationCost: afterAcquirer - anticipatedNet, installments: count };
+  const count = Math.max(1, Math.round(safeNumber(installments)));
+  const afterGateway = Math.max(0, gross * (1 - safeNumber(ratePercent) / 100) - safeNumber(fixedFee));
+  if (!anticipate || safeNumber(anticipationPercent) === 0 || count === 1) return { net: afterGateway, installments: count };
+  const rate = safeNumber(anticipationPercent) / 100;
+  const installment = afterGateway / count;
+  let net = 0;
+  for (let month = 1; month <= count; month += 1) net += installment / Math.pow(1 + rate, month);
+  return { net, installments: count };
 }
 
-function calculate(s = state) {
-  const monthlyFeePerSale = s.monthlyPrice * (s.monthlyCardRate / 100) + s.monthlyCardFixed;
-  const monthlyNet = Math.max(0, s.monthlyPrice - monthlyFeePerSale);
-  const pixFeePerSale = s.annualPixPrice * (s.pixRate / 100) + s.pixFixed;
-  const pixNet = Math.max(0, s.annualPixPrice - pixFeePerSale);
-  const annualCard = cardSettlement(s.annualCardPrice, s.annualCardRate, s.annualCardFixed, s.installments, s.anticipationRate, s.anticipate);
-  const annualCardTotalFees = s.annualCardPrice - annualCard.net;
-
-  const monthlyContribution = monthlyNet - s.monthlyPrice * (s.taxPercent / 100) - s.variableCostPerUser;
-  const pixContribution = pixNet - s.annualPixPrice * (s.taxPercent / 100) - s.variableCostPerUser * 12;
-  const cardContribution = annualCard.net - s.annualCardPrice * (s.taxPercent / 100) - s.variableCostPerUser * 12;
-
-  const active = s.monthlyActive + s.annualPixActive + s.annualCardActive;
-  const mrr = s.monthlyActive * s.monthlyPrice + s.annualPixActive * s.annualPixPrice / 12 + s.annualCardActive * s.annualCardPrice / 12;
-  const monthlyPaymentCosts = s.monthlyActive * monthlyFeePerSale + (s.annualPixActive / 12) * pixFeePerSale + (s.annualCardActive / 12) * annualCardTotalFees;
-  const taxes = mrr * (s.taxPercent / 100);
-  const variableCosts = active * s.variableCostPerUser;
-  const netRevenue = mrr - monthlyPaymentCosts - taxes;
-  const preFixedContribution = netRevenue - variableCosts;
-  const profit = preFixedContribution - s.fixedMonthlyCost;
-  const margin = mrr ? profit / mrr * 100 : 0;
-  const contributionPerActive = active ? preFixedContribution / active : 0;
-  const breakeven = contributionPerActive > 0 ? Math.ceil(s.fixedMonthlyCost / contributionPerActive) : 0;
-
-  const monthlyCash = s.monthlyActive * monthlyNet;
-  const pixCash = s.annualPixSales * pixNet;
-  const cardCashPerSale = s.anticipate ? annualCard.net : annualCard.net / annualCard.installments;
-  const cardCash = s.annualCardSales * cardCashPerSale;
-  const cashNow = monthlyCash + pixCash + cardCash;
-  const receivables = s.anticipate ? 0 : s.annualCardSales * annualCard.net * (annualCard.installments - 1) / annualCard.installments;
-
-  const comparison = [
-    { key: "monthly", label: "mensal no cartão", annualContribution: monthlyContribution * 12 },
-    { key: "pix", label: "anual no Pix", annualContribution: pixContribution },
-    { key: "card", label: "anual no cartão", annualContribution: cardContribution }
-  ].sort((a, b) => b.annualContribution - a.annualContribution);
-
+function planResult(key, revenue, paymentCost, tax, usageCost, fixedShare, cash) {
+  const contribution = revenue - paymentCost - tax - usageCost;
+  const profit = contribution - fixedShare;
   return {
-    monthlyFeePerSale, monthlyNet, pixFeePerSale, pixNet, annualCard, annualCardTotalFees,
-    monthlyContribution, pixContribution, cardContribution, active, mrr, monthlyPaymentCosts,
-    taxes, variableCosts, netRevenue, preFixedContribution, profit, margin, contributionPerActive,
-    breakeven, cashNow, receivables, comparison
+    key, revenue, paymentCost, tax, usageCost, fixedShare, cash, contribution, profit,
+    contributionMargin: revenue ? contribution / revenue * 100 : 0,
+    margin: revenue ? profit / revenue * 100 : 0,
+    breakeven: contribution > 0 ? Math.ceil(state.fixedMonthlyCost / contribution) : 0
   };
 }
 
+function calculate(s = state) {
+  const usageCost = s.messagesPerUser * s.messageUnitCost + s.aiActionsPerUser * s.aiUnitCost + s.otherVariableCost;
+  const active = Math.max(1, s.activeCustomers);
+  const fixedShare = s.fixedMonthlyCost / active;
+
+  const monthlyGateway = s.monthlyPrice * (s.monthlyCardRate / 100) + s.monthlyCardFixed;
+  const monthly = planResult(
+    "monthly", s.monthlyPrice, monthlyGateway, s.monthlyPrice * (s.taxPercent / 100), usageCost,
+    fixedShare, Math.max(0, s.monthlyPrice - monthlyGateway)
+  );
+
+  const pixGatewayTotal = s.annualPixPrice * (s.pixRate / 100) + s.pixFixed;
+  const pix = planResult(
+    "pix", s.annualPixPrice / 12, pixGatewayTotal / 12, s.annualPixPrice * (s.taxPercent / 100) / 12,
+    usageCost, fixedShare, Math.max(0, s.annualPixPrice - pixGatewayTotal)
+  );
+
+  const settlement = cardSettlement(s.annualCardPrice, s.annualCardRate, s.annualCardFixed, s.installments, s.anticipationRate, s.anticipate);
+  const cardFinancialCostTotal = s.annualCardPrice - settlement.net;
+  const cardCash = s.anticipate ? settlement.net : settlement.net / settlement.installments;
+  const card = planResult(
+    "card", s.annualCardPrice / 12, cardFinancialCostTotal / 12, s.annualCardPrice * (s.taxPercent / 100) / 12,
+    usageCost, fixedShare, cardCash
+  );
+
+  const plans = [monthly, pix, card].sort((a, b) => b.profit - a.profit);
+  return { usageCost, fixedShare, monthly, pix, card, plans, winner: plans[0], runnerUp: plans[1], settlement };
+}
+
 function bindInputs() {
-  document.querySelectorAll("[data-key]").forEach((input) => {
+  document.querySelectorAll("[data-key]").forEach(input => {
     const key = input.dataset.key;
-    if (input.type === "checkbox") input.checked = Boolean(state[key]);
-    else input.value = state[key];
+    if (input.type === "checkbox") input.checked = Boolean(state[key]); else input.value = state[key];
     input.addEventListener("input", () => {
-      state[key] = input.type === "checkbox" ? input.checked : n(input.value);
+      state[key] = input.type === "checkbox" ? input.checked : safeNumber(input.value);
       persistAndRender();
     });
     if (input.type === "number") input.addEventListener("focus", () => input.select());
@@ -116,59 +111,75 @@ function bindInputs() {
   const scenario = document.getElementById("scenarioName");
   scenario.value = state.scenarioName;
   scenario.addEventListener("input", () => { state.scenarioName = scenario.value; persistAndRender(); });
+  document.querySelectorAll("[data-preset]").forEach(button => button.addEventListener("click", () => applyPreset(button.dataset.preset)));
+}
+
+function applyPreset(name) {
+  const preset = presets[name];
+  if (!preset) return;
+  state.messagesPerUser = preset.messagesPerUser;
+  state.aiActionsPerUser = preset.aiActionsPerUser;
+  document.querySelector('[data-key="messagesPerUser"]').value = state.messagesPerUser;
+  document.querySelector('[data-key="aiActionsPerUser"]').value = state.aiActionsPerUser;
+  persistAndRender();
+}
+
+function updatePresetState() {
+  document.querySelectorAll("[data-preset]").forEach(button => {
+    const preset = presets[button.dataset.preset];
+    button.classList.toggle("active", state.messagesPerUser === preset.messagesPerUser && state.aiActionsPerUser === preset.aiActionsPerUser);
+  });
+}
+
+function renderPlan(prefix, result) {
+  setText(`${prefix}RevenueLabel`, `${money.format(result.revenue)} / mês`);
+  setText(`${prefix}Profit`, money.format(result.profit));
+  setText(`${prefix}Margin`, `${percent.format(result.margin)}%`);
+  setText(`${prefix}Revenue`, money.format(result.revenue));
+  setText(`${prefix}CommercialCost`, `− ${money.format(result.paymentCost + result.tax)}`);
+  setText(`${prefix}UsageCost`, `− ${money.format(result.usageCost)}`);
+  setText(`${prefix}Contribution`, `${money.format(result.contribution)} · ${percent.format(result.contributionMargin)}%`);
+  setText(`${prefix}FixedShare`, `− ${money.format(result.fixedShare)}`);
+  setText(`${prefix}Cash`, money.format(result.cash));
+  setText(`${prefix}Breakeven`, result.breakeven ? `${integer.format(result.breakeven)} clientes` : "—");
+  document.getElementById(`${prefix}Profit`).classList.toggle("negative", result.profit < 0);
+  document.getElementById(`${prefix}Margin`).classList.toggle("negative", result.margin < 0);
 }
 
 function render() {
   const r = calculate();
-  const installments = Math.max(1, Math.round(state.installments));
-  setText("installmentLabel", `${installments}× no cartão`);
-  setText("cardNetLabel", state.anticipate ? "líquido antecipado" : `total em ${installments} parcelas`);
+  updatePresetState();
+  setText("installmentLabel", `parcelado em ${Math.max(1, Math.round(state.installments))}×`);
+  setText("usageCostInline", money.format(r.usageCost));
+  setText("usageCostValue", money.format(r.usageCost));
+  setText("fixedShareValue", money.format(r.fixedShare));
+  setText("cardCashLabel", state.anticipate ? "Caixa líquido antecipado" : "Primeira parcela líquida");
 
-  setText("monthlyNet", money.format(r.monthlyNet));
-  setText("monthlyFees", money.format(r.monthlyFeePerSale));
-  setText("monthlyContribution", money.format(r.monthlyContribution));
-  setText("pixNet", money.format(r.pixNet));
-  setText("pixFees", money.format(r.pixFeePerSale));
-  setText("pixContribution", money.format(r.pixContribution));
-  setText("cardNet", money.format(r.annualCard.net));
-  setText("cardFees", money.format(r.annualCardTotalFees));
-  setText("cardContribution", money.format(r.cardContribution));
+  renderPlan("monthly", r.monthly);
+  renderPlan("pix", r.pix);
+  renderPlan("card", r.card);
 
-  const retained = [
-    state.monthlyPrice ? r.monthlyNet / state.monthlyPrice * 100 : 0,
-    state.annualPixPrice ? r.pixNet / state.annualPixPrice * 100 : 0,
-    state.annualCardPrice ? r.annualCard.net / state.annualCardPrice * 100 : 0
-  ];
-  document.getElementById("monthlyBar").style.width = `${Math.max(0, Math.min(100, retained[0]))}%`;
-  document.getElementById("pixBar").style.width = `${Math.max(0, Math.min(100, retained[1]))}%`;
-  document.getElementById("cardBar").style.width = `${Math.max(0, Math.min(100, retained[2]))}%`;
-
-  setText("winnerText", `${capitalize(r.comparison[0].label)} deixa mais dinheiro por ano`);
-  setText("mrrValue", money.format(r.mrr));
-  setText("cashNowValue", money.format(r.cashNow));
-  setText("cashNowNote", state.anticipate ? "líquido de taxas e antecipação" : "inclui só a 1ª parcela das vendas anuais");
-  setText("netRevenueValue", money.format(r.netRevenue));
-  setText("variableCostsValue", `− ${money.format(r.variableCosts)}`);
-  setText("fixedCostValue", `− ${money.format(state.fixedMonthlyCost)}`);
-  setText("profitValue", money.format(r.profit));
-  document.getElementById("profitValue").classList.toggle("negative", r.profit < 0);
-  setText("marginValue", `${percent.format(r.margin)}%`);
-  setText("breakevenValue", r.breakeven ? `${number.format(r.breakeven)} clientes` : "—");
-  setText("receivablesValue", money.format(r.receivables));
+  setText("winnerName", labels[r.winner.key]);
+  setText("winnerProfit", money.format(r.winner.profit));
+  const difference = r.winner.profit - r.runnerUp.profit;
+  setText("winnerReason", `${money.format(difference)} a mais por cliente/mês que o segundo colocado · ${money.format(difference * 12)} por ano.`);
 
   const badge = document.getElementById("healthBadge");
   badge.className = "health";
-  if (r.margin >= 20) badge.textContent = "Margem saudável";
-  else if (r.margin >= 0) { badge.textContent = "Margem apertada"; badge.classList.add("warning"); }
-  else { badge.textContent = "Operação no vermelho"; badge.classList.add("danger"); }
+  if (r.winner.margin >= 20) badge.textContent = "Margem saudável";
+  else if (r.winner.profit >= 0) { badge.textContent = "Margem apertada"; badge.classList.add("warning"); }
+  else { badge.textContent = "Estrutura ainda não se paga"; badge.classList.add("danger"); }
 
-  const pixAdvantage = r.pixContribution - r.cardContribution;
-  let insight;
-  if (!r.active) insight = "Adicione a base ativa para calcular a margem total e o ponto de equilíbrio.";
-  else if (pixAdvantage > 0) insight = `No cenário atual, o Pix preserva ${money.format(pixAdvantage)} a mais que o cartão anual por venda. O efeito vem das taxas e da antecipação.`;
-  else if (pixAdvantage < 0) insight = `O cartão anual preserva ${money.format(Math.abs(pixAdvantage))} a mais que o Pix por venda neste cenário.`;
-  else insight = "Pix e cartão anual deixam a mesma contribuição por venda neste cenário.";
-  setText("decisionText", insight);
+  const allContributionPositive = [r.monthly, r.pix, r.card].every(plan => plan.contribution > 0);
+  let decision;
+  if (r.winner.profit < 0 && allContributionPositive) {
+    decision = `Os três planos pagam o próprio uso, mas a base de ${integer.format(state.activeCustomers)} clientes ainda não dilui ${money.format(state.fixedMonthlyCost)} de estrutura. O melhor ponto de equilíbrio é ${integer.format(r.winner.breakeven)} clientes no ${labels[r.winner.key].toLowerCase()}.`;
+  } else if (r.winner.profit >= 0) {
+    decision = `${labels[r.winner.key]} é o plano mais rentável neste uso. Mesmo após ratear a estrutura, sobra ${money.format(r.winner.profit)} por cliente/mês.`;
+  } else {
+    decision = `O custo de uso está consumindo os planos. Antes de escalar, revise mensagens, IA ou preço; contribuição negativa não melhora apenas adicionando clientes.`;
+  }
+  setText("decisionText", decision);
 }
 
 function persistAndRender() {
@@ -192,11 +203,12 @@ function resetScenario() {
 
 function summaryText() {
   const r = calculate();
-  return `${state.scenarioName}\n\nCOMPARAÇÃO POR VENDA\nMensal cartão: líquido ${money.format(r.monthlyNet)} · contribuição mensal ${money.format(r.monthlyContribution)}\nAnual Pix: líquido ${money.format(r.pixNet)} · contribuição anual ${money.format(r.pixContribution)}\nAnual cartão: líquido ${money.format(r.annualCard.net)} · contribuição anual ${money.format(r.cardContribution)}\n\nVISÃO DO MÊS\nClientes ativos: ${number.format(r.active)}\nReceita mensal equivalente: ${money.format(r.mrr)}\nCaixa líquido agora: ${money.format(r.cashNow)}\nRecebíveis futuros: ${money.format(r.receivables)}\nResultado operacional: ${money.format(r.profit)} (${percent.format(r.margin)}%)\nPonto de equilíbrio: ${r.breakeven ? number.format(r.breakeven) + " clientes" : "—"}`;
+  const line = plan => `${labels[plan.key]}: receita ${money.format(plan.revenue)}/mês · contribuição ${money.format(plan.contribution)} (${percent.format(plan.contributionMargin)}%) · lucro após estrutura ${money.format(plan.profit)} (${percent.format(plan.margin)}%) · equilíbrio ${plan.breakeven ? integer.format(plan.breakeven) + " clientes" : "—"}`;
+  return `${state.scenarioName}\n\nDECISÃO\n${labels[r.winner.key]} deixa mais dinheiro: ${money.format(r.winner.profit)} por cliente/mês.\n\nPREMISSAS\nUso: ${integer.format(state.messagesPerUser)} mensagens e ${integer.format(state.aiActionsPerUser)} leituras com IA por cliente/mês\nCusto de uso: ${money.format(r.usageCost)} por cliente/mês\nBase: ${integer.format(state.activeCustomers)} clientes\nEstrutura fixa: ${money.format(state.fixedMonthlyCost)}/mês (${money.format(r.fixedShare)} por cliente)\n\nPLANOS\n${line(r.monthly)}\n${line(r.pix)}\n${line(r.card)}\n\nObservação: taxas e custos iniciais são premissas ilustrativas e devem ser substituídos pelos valores reais.`;
 }
 
 async function copySummary() {
-  try { await navigator.clipboard.writeText(summaryText()); showToast("Resumo copiado"); }
+  try { await navigator.clipboard.writeText(summaryText()); showToast("Resumo da reunião copiado"); }
   catch { showToast("Não foi possível copiar"); }
 }
 
@@ -205,33 +217,12 @@ function registerWebMcp() {
   if (!context?.registerTool) return;
   const lifecycle = new AbortController();
   const register = tool => Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => {});
-  register({
-    name: "read_economeo_plan_scenario",
-    title: "Ler cenário dos planos",
-    description: "Retorna preços, taxas e os resultados atualmente visíveis no simulador.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, untrustedContentHint: false },
-    execute: () => ({ assumptions: state, results: calculate() })
-  });
-  register({
-    name: "update_economeo_plan_scenario",
-    title: "Atualizar cenário dos planos",
-    description: "Atualiza em lote premissas numéricas do simulador e recalcula a tela.",
-    inputSchema: { type: "object", properties: { assumptions: { type: "object", additionalProperties: { type: "number", minimum: 0 } } }, required: ["assumptions"], additionalProperties: false },
-    annotations: { readOnlyHint: false, untrustedContentHint: false },
-    execute: ({ assumptions }) => {
-      const allowed = Object.keys(defaults).filter(key => typeof defaults[key] === "number");
-      Object.entries(assumptions || {}).forEach(([key, value]) => { if (allowed.includes(key) && Number.isFinite(value) && value >= 0) state[key] = value; });
-      document.querySelectorAll("[data-key]").forEach(input => { if (input.type !== "checkbox") input.value = state[input.dataset.key]; });
-      persistAndRender();
-      return { updated: true, results: calculate() };
-    }
-  });
+  register({ name:"read_economeo_unit_economics", title:"Ler margem dos planos", description:"Retorna premissas, custo de uso e margem mensal por plano.", inputSchema:{type:"object",properties:{},additionalProperties:false}, annotations:{readOnlyHint:true,untrustedContentHint:false}, execute:()=>({assumptions:state,results:calculate()}) });
+  register({ name:"update_economeo_usage_scenario", title:"Atualizar cenário de uso", description:"Atualiza mensagens e leituras de IA por cliente e recalcula os planos.", inputSchema:{type:"object",properties:{messagesPerUser:{type:"number",minimum:0},aiActionsPerUser:{type:"number",minimum:0}},additionalProperties:false}, annotations:{readOnlyHint:false,untrustedContentHint:false}, execute:input=>{ if(Number.isFinite(input.messagesPerUser)) state.messagesPerUser=input.messagesPerUser; if(Number.isFinite(input.aiActionsPerUser)) state.aiActionsPerUser=input.aiActionsPerUser; document.querySelector('[data-key="messagesPerUser"]').value=state.messagesPerUser; document.querySelector('[data-key="aiActionsPerUser"]').value=state.aiActionsPerUser; persistAndRender(); return {updated:true,results:calculate()}; } });
 }
 
 function setText(id, value) { document.getElementById(id).textContent = value; }
-function capitalize(value) { return value.charAt(0).toUpperCase() + value.slice(1); }
-function showToast(message) { const toast = document.getElementById("toast"); toast.textContent = message; toast.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("show"), 1800); }
+function showToast(message) { const toast=document.getElementById("toast"); toast.textContent=message; toast.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.classList.remove("show"),1800); }
 
 document.getElementById("resetButton").addEventListener("click", resetScenario);
 document.getElementById("copyButton").addEventListener("click", copySummary);
